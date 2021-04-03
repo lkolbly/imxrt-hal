@@ -35,6 +35,7 @@ pub mod gpt;
 pub mod i2c;
 pub mod pit;
 pub mod pwm;
+pub mod sai;
 pub mod spi;
 pub mod srtc;
 pub mod trng;
@@ -68,6 +69,7 @@ pub struct Peripherals {
     pub dma: dma::Unclocked,
     pub srtc: srtc::Unclocked,
     pub trng: trng::Unclocked,
+    pub sai: sai::Unclocked,
 }
 
 impl Peripherals {
@@ -119,6 +121,11 @@ impl Peripherals {
             dma: dma::Unclocked::new(ral::dma0::DMA0::steal(), ral::dmamux::DMAMUX::steal()),
             srtc: srtc::Unclocked::new(ral::snvs::SNVS::steal()),
             trng: trng::Unclocked::new(ral::trng::TRNG::steal()),
+            sai: sai::Unclocked {
+                sai1: ral::sai::SAI1::steal(),
+                sai2: ral::sai::SAI2::steal(),
+                sai3: ral::sai::SAI3::steal(),
+            },
         }
     }
 
@@ -167,6 +174,11 @@ impl Peripherals {
             dma: dma::Unclocked::new(ral::dma0::DMA0::take()?, ral::dmamux::DMAMUX::take()?),
             srtc: srtc::Unclocked::new(ral::snvs::SNVS::take()?),
             trng: trng::Unclocked::new(ral::trng::TRNG::take()?),
+            sai: sai::Unclocked {
+                sai1: ral::sai::SAI1::take()?,
+                sai2: ral::sai::SAI2::take()?,
+                sai3: ral::sai::SAI3::take()?,
+            },
         };
         Some(p)
     }
