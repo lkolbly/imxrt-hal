@@ -69,7 +69,9 @@ pub struct Peripherals {
     pub dma: dma::Unclocked,
     pub srtc: srtc::Unclocked,
     pub trng: trng::Unclocked,
-    pub sai: sai::Unclocked,
+    pub sai1: sai::Unclocked<iomuxc::consts::U1>,
+    pub sai2: sai::Unclocked<iomuxc::consts::U2>,
+    pub sai3: sai::Unclocked<iomuxc::consts::U3>,
 }
 
 impl Peripherals {
@@ -121,10 +123,17 @@ impl Peripherals {
             dma: dma::Unclocked::new(ral::dma0::DMA0::steal(), ral::dmamux::DMAMUX::steal()),
             srtc: srtc::Unclocked::new(ral::snvs::SNVS::steal()),
             trng: trng::Unclocked::new(ral::trng::TRNG::steal()),
-            sai: sai::Unclocked {
-                sai1: ral::sai::SAI1::steal(),
-                sai2: ral::sai::SAI2::steal(),
-                sai3: ral::sai::SAI3::steal(),
+            sai1: sai::Unclocked {
+                module: core::marker::PhantomData,
+                sai: ral::sai::SAI1::steal(),
+            },
+            sai2: sai::Unclocked {
+                module: core::marker::PhantomData,
+                sai: ral::sai::SAI2::steal(),
+            },
+            sai3: sai::Unclocked {
+                module: core::marker::PhantomData,
+                sai: ral::sai::SAI3::steal(),
             },
         }
     }
@@ -174,10 +183,17 @@ impl Peripherals {
             dma: dma::Unclocked::new(ral::dma0::DMA0::take()?, ral::dmamux::DMAMUX::take()?),
             srtc: srtc::Unclocked::new(ral::snvs::SNVS::take()?),
             trng: trng::Unclocked::new(ral::trng::TRNG::take()?),
-            sai: sai::Unclocked {
-                sai1: ral::sai::SAI1::take()?,
-                sai2: ral::sai::SAI2::take()?,
-                sai3: ral::sai::SAI3::take()?,
+            sai1: sai::Unclocked {
+                module: core::marker::PhantomData,
+                sai: ral::sai::SAI1::take()?,
+            },
+            sai2: sai::Unclocked {
+                module: core::marker::PhantomData,
+                sai: ral::sai::SAI2::take()?,
+            },
+            sai3: sai::Unclocked {
+                module: core::marker::PhantomData,
+                sai: ral::sai::SAI3::take()?,
             },
         };
         Some(p)
