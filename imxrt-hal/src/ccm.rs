@@ -28,6 +28,8 @@ pub struct CCM {
     pub pll2: pll2::PFD,
     /// The 528 MHz PFD
     pub pll3: pll3::PFD,
+    /// The Audio PLL
+    pub pll4: pll4::FracN,
 }
 
 /// Sets the low power clock mode
@@ -89,6 +91,7 @@ impl CCM {
             pll1: PLL1::new(),
             pll2: pll2::PFD::new(),
             pll3: pll3::PFD::new(),
+            pll4: pll4::FracN::new(),
         }
     }
 
@@ -440,6 +443,112 @@ pub mod pll2 {
     pub const MHZ_271: Frequency = Frequency(35);
 }
 
+/// 648MHz-1320MHz fractional N PLL ("Audio PLL")
+pub mod pll4 {
+    use super::{Frequency, Handle};
+    use imxrt_ral::{self as ral, write_reg};
+
+    const FREF: u32 = 24_000_000;
+
+    pub struct FracN {
+        frequency: Frequency,
+    }
+
+    impl FracN {
+        pub(super) fn new() -> Self {
+            FracN {
+                frequency: Frequency(0),
+            }
+        }
+
+        pub fn set(&mut self, handle: &mut Handle, freq: f64) {
+            self.frequency = Frequency(freq as u32);
+
+            // Figure out what post divisor value we want. Possible values are 1, 2, 4
+            let mut post_div = 4;
+            while freq / (post_div as f64) < 648_000_000.0 && post_div > 1 {
+                post_div = post_div / 2;
+            }
+            let freq = freq / post_div as f64;
+
+            // TODO: Use an enum for this
+            let post_div = match post_div {
+                1 => 0x10,
+                2 => 0x01,
+                4 => 0x00,
+                _ => {
+                    panic!("Unrecognized post_div value {}!", post_div);
+                }
+            };
+
+            let pll_params = PllParameters::from_freq(freq);
+
+            // Bypass the PLL & configure it
+            ral::write_reg!(ral::ccm_analog, handle.analog, PLL_AUDIO,
+                POST_DIV_SELECT: 0b10, // 1/4
+                DIV_SELECT: pll_params.div_select,
+                ENABLE: 1,
+                BYPASS: 1
+            );
+            ral::modify_reg!(ral::ccm_analog, handle.analog, PLL_AUDIO_NUM, A: pll_params.numerator);
+            ral::modify_reg!(ral::ccm_analog, handle.analog, PLL_AUDIO_DENOM, B: pll_params.denominator);
+            ral::modify_reg!(ral::ccm_analog, handle.analog, PLL_AUDIO, POWERDOWN: 0);
+
+            // Wait for lock
+            while ral::read_reg!(ral::ccm_analog, handle.analog, PLL_AUDIO, LOCK) == 0 {}
+
+            // Disable bypass
+            ral::modify_reg!(ral::ccm_analog, handle.analog, PLL_AUDIO, BYPASS: 0);
+        }
+    }
+
+    /// The output frequency of the PLL is Fref * (DIV_SELECT + NUM/DENOM)
+    /// Fref is 24MHz. Valid values for the parameters are:
+    /// - DIV_SELECT: 27 to 54
+    /// - NUM: Any 30-bit number, must be less than DENOM
+    /// - DENOM: Any 30-bit number
+    /// Ergo, the minimum multiplier is 27, and the maximum is (54+1) = 55
+    /// With a Fref of 24MHz, the output can range from 648MHz to 1320MHz
+    struct PllParameters {
+        div_select: u32,
+        numerator: u32,
+        denominator: u32,
+    }
+
+    impl PllParameters {
+        /// Based on the above calculations, `freq` must be between 648MHz and 1320MHz
+        /// Note that some values may not be possible on your device, depending on its
+        /// speed grade.
+        fn from_freq(freq: f64) -> PllParameters {
+            let mult = freq / FREF as f64;
+            let div_select = mult as u32;
+            let denominator = 10_000; // TODO: Increase this w/o making any numbers go outside of range
+            let numerator = (mult * denominator as f64 - (div_select * denominator) as f64) as u32;
+
+            PllParameters {
+                div_select,
+                numerator,
+                denominator,
+            }
+        }
+    }
+
+    #[cfg(test)]
+    mod test {
+        use super::*;
+
+        #[test]
+        fn compute_parameters() {
+            let target_freq = 677_376_000.0;
+            let params = PllParameters::from_freq(target_freq);
+            let actual_freq = 24_000_000.0
+                * (params.div_select as f64 + params.numerator as f64 / params.denominator as f64);
+            let diff = (actual_freq - target_freq).abs();
+            assert!(diff < 1.0);
+        }
+    }
+}
+
 use core::convert::TryFrom;
 pub trait TicksRepr: TryFrom<u64> {}
 impl TicksRepr for u8 {}
@@ -564,6 +673,21 @@ pub mod pwm {
             match clksel {
                 ClockSelect::IPG(IPGFrequency(hz)) => hz,
             }
+        }
+    }
+}
+
+pub mod sai {
+    use super::{pll4, Divider, Frequency, OSCILLATOR_FREQUENCY};
+    use crate::ral;
+
+    pub enum ClockSource<'a> {
+        Pll4(&'a pll4::FracN),
+    }
+
+    impl<'a> From<&'a pll4::FracN> for ClockSource<'a> {
+        fn from(pll: &'a pll4::FracN) -> Self {
+            ClockSource::Pll4(pll)
         }
     }
 }
