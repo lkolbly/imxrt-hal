@@ -52,6 +52,91 @@ pub struct FifoStatus {
     pub watermark: bool,
     pub empty: bool,
     pub full: bool,
+    pub count: usize,
+    pub rfp: u8,
+    pub wfp: u8,
+}
+
+impl FifoStatus {
+    fn from_word(error: bool, tfr0: u32) -> FifoStatus {
+        if error {
+            return FifoStatus {
+                error: true,
+                watermark: false,
+                empty: false,
+                full: false,
+                count: 0,
+                rfp: 0,
+                wfp: 0,
+            };
+        }
+        let wfp = (tfr0 >> 16) & 0b11_1111;
+        let rfp = tfr0 & 0b11_1111;
+        let is_full =
+            ((wfp & 0b1_1111) == (rfp & 0b1_1111) && (wfp & 0b10_0000) != (rfp & 0b10_0000));
+        let is_empty = wfp == rfp;
+        let count = if rfp > wfp {
+            0x40 - rfp + wfp
+        } else {
+            wfp - rfp
+        } as usize;
+        FifoStatus {
+            error: false,
+            watermark: false,
+            empty: is_empty,
+            full: is_full,
+            count: count,
+            rfp: rfp as u8,
+            wfp: wfp as u8,
+        }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn parse_empty_fifostatus() {
+        let s = FifoStatus::from_word(false, 0x001c_001c);
+        assert_eq!(s.error, false);
+        assert_eq!(s.empty, true);
+        assert_eq!(s.full, false);
+        assert_eq!(s.count, 0);
+    }
+
+    #[test]
+    fn parse_full_fifostatus() {
+        let s = FifoStatus::from_word(false, 0x003c_001c);
+        assert_eq!(s.error, false);
+        assert_eq!(s.empty, false);
+        assert_eq!(s.full, true);
+        assert_eq!(s.count, 32);
+    }
+
+    #[test]
+    fn parse_error_fifostatus() {
+        let s = FifoStatus::from_word(true, 0x001c_001c);
+        assert_eq!(s.error, true);
+    }
+
+    #[test]
+    fn parse_halffull_fifostatus() {
+        let s = FifoStatus::from_word(false, 0x0021_001c);
+        assert_eq!(s.error, false);
+        assert_eq!(s.empty, false);
+        assert_eq!(s.full, false);
+        assert_eq!(s.count, 5);
+    }
+
+    #[test]
+    fn parse_halffull_wrap_fifostatus() {
+        let s = FifoStatus::from_word(false, 0x0005_003c);
+        assert_eq!(s.error, false);
+        assert_eq!(s.empty, false);
+        assert_eq!(s.full, false);
+        assert_eq!(s.count, 9);
+    }
 }
 
 pub struct SAI<M> {
@@ -164,19 +249,8 @@ impl<M> SAI<M> {
         } else {
             false
         };
-        //
         let tfr0 = ral::read_reg!(ral::sai, self.reg, TFR0);
-        let wfp = (tfr0 >> 16) & 0b11_1111;
-        let rfp = tfr0 & 0b11_1111;
-        let is_full =
-            ((wfp & 0b1_1111) == (rfp & 0b1_1111) && (wfp & 0b10_0000) != (rfp & 0b10_0000));
-        let is_empty = wfp == rfp;
-        FifoStatus {
-            error: fifo_error,
-            watermark: false,
-            empty: is_empty,
-            full: is_full,
-        }
+        FifoStatus::from_word(fifo_error, tfr0)
     }
 
     pub fn clear_fifo_error(&mut self) {
